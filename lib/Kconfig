@@ -1,5 +1,8 @@
 menu "Library routines"
 
+config FIRMWARE_HANDOFF
+	bool "Enable support for Firmware Handoff Transfer List"
+
 config ADDR_MAP
 	bool "Enable support for non-identity virtual-physical mappings"
 	help
