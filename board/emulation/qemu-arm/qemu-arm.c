@@ -9,6 +9,7 @@
 #include <fdtdec.h>
 #include <init.h>
 #include <log.h>
+#include <transfer_list.h>
 #include <virtio_types.h>
 #include <virtio.h>
 
@@ -63,6 +64,12 @@ static struct mm_region qemu_arm64_mem_map[] = {
 struct mm_region *mem_map = qemu_arm64_mem_map;
 #endif
 
+/* Boot parameters saved from lowlevel_init.S */
+struct {
+	unsigned long arg1;
+	unsigned long arg3;
+} qemu_saved_args __section(".data");
+
 int board_init(void)
 {
 	return 0;
@@ -96,8 +103,64 @@ int dram_init_banksize(void)
 
 void *board_fdt_blob_setup(void)
 {
-	/* QEMU loads a generated DTB for us at the start of RAM. */
-	return (void *)CONFIG_SYS_SDRAM_BASE;
+	/*
+	 * QEMU loads a generated DTB for us at the start of RAM. Either
+	 * use this DTB or use the location for a new DTB.
+	 */
+	void *fdt = (void *)CONFIG_SYS_SDRAM_BASE;
+#if defined(CONFIG_FIRMWARE_HANDOFF)
+	unsigned long max_size = 0x10000;
+	struct transfer_list *tl = gd->transfer_list;
+	struct transfer_entry *te_fdt;
+	struct transfer_entry *te_fdto;
+	void *new_fdt;
+
+	/*
+	 * If it looks like there's a valid DTB at the start of RAM save
+	 * that as a backup DTB and use the location right after for the
+	 * as the a temporary location of the new DTB.
+	 */
+	if (!fdt_check_header(fdt))
+		new_fdt = (uint8_t *)fdt + roundup(fdt_totalsize(fdt), 0x1000);
+	else
+		new_fdt = fdt;
+
+	if (!tl && qemu_saved_args.arg1 == TRANSFER_LIST_SIGNATURE &&
+	    qemu_saved_args.arg3) {
+		tl = transfer_list_check_header((void *)qemu_saved_args.arg3);
+		gd->transfer_list = tl;;
+	}
+
+	if (!tl)
+		return fdt;
+
+	te_fdt = transfer_list_find(tl, TL_TAG_FDT);
+	if (!te_fdt)
+		return fdt;
+
+	if (fdt_open_into(transfer_list_data(te_fdt), new_fdt, max_size))
+		return fdt;
+
+	te_fdto = transfer_list_find(tl, TL_TAG_FDT_OVERLAY);
+	if (!te_fdto)
+		goto use_new_fdt;
+
+	if (fdt_overlay_apply(new_fdt, transfer_list_data(te_fdto))) {
+		/*
+		 * We failed to apply the overlay for some reason, use the
+		 * DTB unmodified instead.
+		 */
+		if (fdt_open_into(transfer_list_data(te_fdt), new_fdt,
+				  max_size))
+			return fdt;
+	}
+
+use_new_fdt:
+	fdt_move(new_fdt, fdt, fdt_totalsize(new_fdt));
+	return fdt;
+#endif
+
+	return fdt;
 }
 
 void enable_caches(void)
