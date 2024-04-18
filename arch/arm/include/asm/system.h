@@ -16,6 +16,11 @@
 #define CR_I		(1 << 12)	/* Icache enable		*/
 #define CR_WXN		(1 << 19)	/* Write Permision Imply XN	*/
 #define CR_EE		(1 << 25)	/* Exception (Big) Endian	*/
+#define CR_TCF_SHIFT	40		/* Tag Check Faults control	*/
+#define CR_ATA		BIT_ULL(43)	/* Allocation Tag Access	*/
+
+#define CR_TCF_SYNC	1ULL
+#define CR_TCF_ASYNC	2ULL
 
 #define ES_TO_AARCH64		1
 #define ES_TO_AARCH32		0
@@ -162,7 +167,7 @@ static inline unsigned int current_el(void)
 	return 3 & (el >> 2);
 }
 
-static inline unsigned int get_sctlr(void)
+static inline unsigned long get_sctlr(void)
 {
 	unsigned int el;
 	unsigned long val;

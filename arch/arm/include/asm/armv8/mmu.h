@@ -107,12 +107,16 @@
 #define TCR_TG0_64K		(1 << 14)
 #define TCR_TG0_16K		(2 << 14)
 #define TCR_EPD1_DISABLE	(1 << 23)
+#define TCR_TBI0		BIT_ULL(37)
+#define TCR_TCMA0		BIT_ULL(57)
 
 #define TCR_EL1_RSVD		(1U << 31)
 #define TCR_EL2_RSVD		(1U << 31 | 1 << 23)
 #define TCR_EL3_RSVD		(1U << 31 | 1 << 23)
 
 #define HCR_EL2_E2H_BIT		34
+
+#define GCR_EL1_RRND		BIT(16)
 
 #define ID_AA64PFR1_EL1_MTE_MASK	0xfUL
 #define ID_AA64PFR1_EL1_MTE_SHIFT	8

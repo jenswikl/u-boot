@@ -11,6 +11,7 @@
 #include <cpu_func.h>
 #include <hang.h>
 #include <log.h>
+#include <memtag.h>
 #include <asm/cache.h>
 #include <asm/global_data.h>
 #include <asm/system.h>
@@ -20,6 +21,175 @@ DECLARE_GLOBAL_DATA_PTR;
 
 
 #if !CONFIG_IS_ENABLED(SYS_DCACHE_OFF)
+
+#if CONFIG_IS_ENABLED(ARMV8_MTE)
+/* This is for AArch64 only, MTE is only available in this mode */
+
+static void write_gcr_el1(u64 val)
+{
+	asm volatile("msr gcr_el1, %0" : : "r" (val));
+}
+
+static void write_tcr_el1(u64 val)
+{
+	asm volatile("msr tcr_el1, %0" : : "r" (val));
+}
+
+static u64 read_tcr_el1(void)
+{
+	u64 val;
+
+	asm volatile("mrs %0, tcr_el1" : "=r" (val));
+
+	return val;
+}
+
+static u64 read_dczid_el0(void)
+{
+	u64 v;
+
+	asm volatile("mrs %0, dczid_el0" : "=r" (v));
+
+	return v;
+}
+
+static unsigned int dczid_block_size(void)
+{
+	return 4U << (read_dczid_el0() & 0xf);
+}
+
+static void dc_gva(uint64_t va)
+{
+	asm volatile ("dc gva, %0" : : "r" (va));
+}
+
+static unsigned long stg_and_advance(unsigned long va)
+{
+	asm volatile("stg %0, [%0], #16" : "+r"(va) : : "memory");
+
+	return va;
+}
+
+static void *insert_random_tag(void *addr)
+{
+	asm volatile("irg %0, %0" : "+r"(addr) : : );
+
+	return addr;
+}
+
+static void *load_tag(void *addr)
+{
+	asm volatile("ldg %0, [%0]" : "+r"(addr) : : );
+
+	return addr;
+}
+
+static void set_tags_dc_gva(unsigned long va, size_t size, size_t dcsz)
+{
+	do {
+		dc_gva(va);
+		va += dcsz;
+		size -= dcsz;
+	} while (size);
+}
+
+static void *set_tags_helper(void *addr, size_t size)
+{
+	unsigned long va = (unsigned long)addr;
+	unsigned long end = va + size;
+
+	assert(!(va & __MEMTAG_GRANULE_MASK));
+	assert(!(size & __MEMTAG_GRANULE_MASK));
+
+	while (va < end)
+		va = stg_and_advance(va);
+
+	return addr;
+}
+
+static void *set_tags_dc_helper(void *addr, size_t size)
+{
+	size_t dcsz = dczid_block_size();
+	unsigned long va = (unsigned long)addr;
+	size_t mask = dcsz - 1;
+	size_t s = 0;
+
+	if (va & mask) {
+		s = min(dcsz - (va & mask), size);
+		set_tags_helper((void *)va, s);
+		va += s;
+		size -= s;
+	}
+	s = size & ~mask;
+	if (s) {
+		set_tags_dc_gva(va, s, dcsz);
+		va += s;
+		size -= s;
+	}
+	if (size)
+		set_tags_helper((void *)va, size);
+
+	return addr;
+}
+
+static bool memtag_is_enabled(void)
+{
+	return get_sctlr() & CR_ATA;
+}
+
+void *memtag_set_tags(void *addr, size_t size, uint8_t tag)
+{
+	if (!memtag_is_enabled())
+		return addr;
+
+	return set_tags_dc_helper(memtag_insert_tag(addr, tag), size);
+}
+
+void *memtag_set_random_tags(void *addr, size_t size)
+{
+	if (!memtag_is_enabled())
+		return addr;
+
+	return set_tags_dc_helper(insert_random_tag(addr), size);
+}
+
+uint8_t memtag_read_tag(const void *addr)
+{
+	if (!memtag_is_enabled())
+		return 0;
+
+	return memtag_get_tag(load_tag((void *)addr));
+}
+
+static void memtag_init(void)
+{
+	if (feat_mte2_is_available()) {
+		/*
+		 * Avoid tag = 0x0 (bit 0) and 0xf (bit 15), and set
+		 * GCR_EL1_RRND = 1 to allow an implementation specific
+		 * method of generating the tags.
+		 */
+		write_gcr_el1(BIT(0) | BIT(15) | GCR_EL1_RRND);
+
+		/*
+		 * TCR_TBI0 - top byte ignored for TTBR0_EL1 region
+		 * TCR_TCMA0 - unchecked access for tag 0
+		 */
+		write_tcr_el1(read_tcr_el1() | TCR_TBI0 | TCR_TCMA0);
+
+		/*
+		 * Set SCTLR_TCF_SYNC - Tag Check Faults are synchronous
+		 * and SCTLR_ATA - Allocation Tag Access
+		 */
+		set_sctlr(get_sctlr() | (CR_TCF_SYNC << CR_TCF_SHIFT) | CR_ATA);
+		debug("memtag is enabled.\n");
+	}
+}
+#else
+static void memtag_init(void)
+{
+}
+#endif
 
 /*
  *  With 4k page granule, a virtual address is split into 4 lookup parts
@@ -483,6 +653,8 @@ __weak void mmu_setup(void)
 
 	/* enable the mmu */
 	set_sctlr(get_sctlr() | CR_M);
+
+	memtag_init();
 }
 
 /*
