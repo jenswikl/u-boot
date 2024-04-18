@@ -75,7 +75,7 @@ static struct mm_region qemu_arm64_mem_map[] = {
 		.virt = 0x40000000UL,
 		.phys = 0x40000000UL,
 		.size = 255UL * SZ_1G,
-		.attrs = PTE_BLOCK_MEMTYPE(MT_NORMAL) |
+		.attrs = PTE_BLOCK_MEMTYPE(MT_NORMAL_TAGGED) |
 			 PTE_BLOCK_INNER_SHARE
 	}, {
 		/* Highmem PCI-E ECAM memory area */
