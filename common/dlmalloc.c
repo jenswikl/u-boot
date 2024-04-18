@@ -32,6 +32,8 @@ void malloc_stats();
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#include <memtag.h>
+
 /*
   Emulation of sbrk for WIN32
   All code within the ifdef WIN32 is untested by me.
@@ -1335,7 +1337,7 @@ Void_t* mALLOc(bytes) size_t bytes;
       set_inuse_bit_at_offset(victim, victim_size);
       check_malloced_chunk(victim, nb);
       VALGRIND_MALLOCLIKE_BLOCK(chunk2mem(victim), bytes, SIZE_SZ, false);
-      return chunk2mem(victim);
+      return memtag_set_random_tags(chunk2mem(victim), nb);
     }
 
     idx += 2; /* Set for bin scan below. We've already scanned 2 bins. */
@@ -1363,7 +1365,7 @@ Void_t* mALLOc(bytes) size_t bytes;
 	set_inuse_bit_at_offset(victim, victim_size);
 	check_malloced_chunk(victim, nb);
         VALGRIND_MALLOCLIKE_BLOCK(chunk2mem(victim), bytes, SIZE_SZ, false);
-	return chunk2mem(victim);
+        return memtag_set_random_tags(chunk2mem(victim), nb);
       }
     }
 
@@ -1387,7 +1389,7 @@ Void_t* mALLOc(bytes) size_t bytes;
       set_foot(remainder, remainder_size);
       check_malloced_chunk(victim, nb);
       VALGRIND_MALLOCLIKE_BLOCK(chunk2mem(victim), bytes, SIZE_SZ, false);
-      return chunk2mem(victim);
+      return memtag_set_random_tags(chunk2mem(victim), nb);
     }
 
     clear_last_remainder;
@@ -1397,7 +1399,7 @@ Void_t* mALLOc(bytes) size_t bytes;
       set_inuse_bit_at_offset(victim, victim_size);
       check_malloced_chunk(victim, nb);
       VALGRIND_MALLOCLIKE_BLOCK(chunk2mem(victim), bytes, SIZE_SZ, false);
-      return chunk2mem(victim);
+      return memtag_set_random_tags(chunk2mem(victim), nb);
     }
 
     /* Else place in bin */
@@ -1453,7 +1455,7 @@ Void_t* mALLOc(bytes) size_t bytes;
 	    set_foot(remainder, remainder_size);
 	    check_malloced_chunk(victim, nb);
 	    VALGRIND_MALLOCLIKE_BLOCK(chunk2mem(victim), bytes, SIZE_SZ, false);
-	    return chunk2mem(victim);
+            return memtag_set_random_tags(chunk2mem(victim), nb);
 	  }
 
 	  else if (remainder_size >= 0)  /* take */
@@ -1462,7 +1464,7 @@ Void_t* mALLOc(bytes) size_t bytes;
 	    unlink(victim, bck, fwd);
 	    check_malloced_chunk(victim, nb);
 	    VALGRIND_MALLOCLIKE_BLOCK(chunk2mem(victim), bytes, SIZE_SZ, false);
-	    return chunk2mem(victim);
+            return memtag_set_random_tags(chunk2mem(victim), nb);
 	  }
 
 	}
@@ -1526,7 +1528,7 @@ Void_t* mALLOc(bytes) size_t bytes;
   set_head(top, remainder_size | PREV_INUSE);
   check_malloced_chunk(victim, nb);
   VALGRIND_MALLOCLIKE_BLOCK(chunk2mem(victim), bytes, SIZE_SZ, false);
-  return chunk2mem(victim);
+  return memtag_set_random_tags(chunk2mem(victim), nb);
 
 }
 
@@ -1572,6 +1574,9 @@ void fREe(mem) Void_t* mem;
   mchunkptr fwd;       /* misc temp for linking */
   int       islr;      /* track whether merging with last_remainder */
 
+  memtag_assert_tag(mem); /* Trying to catch double free early */
+  mem = memtag_strip_tag(mem);
+
 #if CONFIG_IS_ENABLED(SYS_MALLOC_F)
 	/* free() is a no-op - all the memory will be freed on relocation */
 	if (!(gd->flags & GD_FLG_FULL_MALLOC_INIT)) {
@@ -1585,6 +1590,7 @@ void fREe(mem) Void_t* mem;
 
   p = mem2chunk(mem);
   hd = p->size;
+  memtag_set_tags(mem, hd & ~SIZE_BITS, 0);
 
 #if HAVE_MMAP
   if (hd & IS_MMAPPED)                       /* release mmapped memory. */
@@ -1742,6 +1748,8 @@ Void_t* rEALLOc(oldmem, bytes) Void_t* oldmem; size_t bytes;
 	}
 #endif
 
+  memtag_assert_tag(oldmem); /* Trying to catch double free early */
+  oldmem = memtag_strip_tag(oldmem);
   newp    = oldp    = mem2chunk(oldmem);
   newsize = oldsize = chunksize(oldp);
 
@@ -1790,7 +1798,7 @@ Void_t* rEALLOc(oldmem, bytes) Void_t* oldmem; size_t bytes;
 	  set_head_size(oldp, nb);
 	  VALGRIND_RESIZEINPLACE_BLOCK(chunk2mem(oldp), 0, bytes, SIZE_SZ);
 	  VALGRIND_MAKE_MEM_DEFINED(chunk2mem(oldp), bytes);
-	  return chunk2mem(oldp);
+          return memtag_set_random_tags(chunk2mem(oldp), nb);
 	}
       }
 
@@ -1836,7 +1844,8 @@ Void_t* rEALLOc(oldmem, bytes) Void_t* oldmem; size_t bytes;
 	    set_head(top, (newsize - nb) | PREV_INUSE);
 	    set_head_size(newp, nb);
 	    VALGRIND_FREELIKE_BLOCK(oldmem, SIZE_SZ);
-	    return newmem;
+            memtag_set_tags(oldmem, oldsize - 2*SIZE_SZ, 0);
+            return memtag_set_random_tags(newmem, nb);
 	  }
 	}
 
@@ -1914,7 +1923,7 @@ Void_t* rEALLOc(oldmem, bytes) Void_t* oldmem; size_t bytes;
   }
 
   check_inuse_chunk(newp);
-  return chunk2mem(newp);
+  return memtag_set_random_tags(chunk2mem(newp), nb);
 }
 
 
@@ -2019,6 +2028,7 @@ Void_t* mEMALIGn(alignment, bytes) size_t alignment; size_t bytes;
 
   if (m == NULL) return NULL; /* propagate failure */
 
+  m = memtag_strip_tag(m);
   p = mem2chunk(m);
 
   if ((((unsigned long)(m)) % alignment) == 0) /* aligned */
@@ -2082,7 +2092,7 @@ Void_t* mEMALIGn(alignment, bytes) size_t alignment; size_t bytes;
   }
 
   check_inuse_chunk(p);
-  return chunk2mem(p);
+  return memtag_set_random_tags(chunk2mem(p), nb);
 
 }
 
@@ -2159,7 +2169,7 @@ Void_t* cALLOc(n, elem_size) size_t n; size_t elem_size;
 		return mem;
 	}
 #endif
-    p = mem2chunk(mem);
+    p = mem2chunk(memtag_strip_tag(mem));
 
     /* Two optional cases in which clearing not necessary */
 

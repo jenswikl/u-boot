@@ -17,6 +17,8 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#include <memtag.h>
+
 static void *alloc_simple(size_t bytes, int align)
 {
 	ulong addr, new_ptr;
@@ -41,27 +43,30 @@ void *malloc_simple(size_t bytes)
 {
 	void *ptr;
 
-	ptr = alloc_simple(bytes, 1);
+	bytes = round_up(bytes, MEMTAG_GRANULE_SIZE);
+	ptr = alloc_simple(bytes, MEMTAG_GRANULE_SIZE);
 	if (!ptr)
 		return ptr;
 
 	log_debug("%lx\n", (ulong)ptr);
 	VALGRIND_MALLOCLIKE_BLOCK(ptr, bytes, 0, false);
 
-	return ptr;
+	return memtag_set_random_tags(ptr, bytes);
 }
 
 void *memalign_simple(size_t align, size_t bytes)
 {
 	void *ptr;
 
+	bytes = round_up(bytes, MEMTAG_GRANULE_SIZE);
+	align = round_up(align, MEMTAG_GRANULE_SIZE);
 	ptr = alloc_simple(bytes, align);
 	if (!ptr)
 		return ptr;
 	log_debug("aligned to %lx\n", (ulong)ptr);
 	VALGRIND_MALLOCLIKE_BLOCK(ptr, bytes, 0, false);
 
-	return ptr;
+	return memtag_set_random_tags(ptr, bytes);
 }
 
 #if CONFIG_IS_ENABLED(SYS_MALLOC_SIMPLE)
@@ -81,6 +86,8 @@ void *calloc(size_t nmemb, size_t elem_size)
 #if IS_ENABLED(CONFIG_VALGRIND)
 void free_simple(void *ptr)
 {
+	memtag_assert_tag(ptr);
+	ptr = memtag_set_tags(ptr, MEMTAG_GRANULE_SIZE, 0);
 	VALGRIND_FREELIKE_BLOCK(ptr, 0);
 }
 #endif
