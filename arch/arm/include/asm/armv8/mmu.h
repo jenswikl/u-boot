@@ -30,12 +30,21 @@
 #define MT_DEVICE_GRE		2
 #define MT_NORMAL_NC		3
 #define MT_NORMAL		4
+#define MT_NORMAL_TAGGED	5
 
-#define MEMORY_ATTRIBUTES	((0x00 << (MT_DEVICE_NGNRNE * 8)) |	\
+#define __MEMORY_ATTRIBUTES	((0x00 << (MT_DEVICE_NGNRNE * 8)) |	\
 				(0x04 << (MT_DEVICE_NGNRE * 8))   |	\
 				(0x0c << (MT_DEVICE_GRE * 8))     |	\
 				(0x44 << (MT_NORMAL_NC * 8))      |	\
 				(UL(0xff) << (MT_NORMAL * 8)))
+
+/* MT_NORMAL_TAGGED is defined as MT_NORMAL for systems without FEAT_MTE* */
+#define MEMORY_ATTRIBUTES	(__MEMORY_ATTRIBUTES		  |	\
+				(UL(0xff) << (MT_NORMAL_TAGGED * 8)))
+
+/* Only to be used for systems that implements FEAT_MTE* */
+#define MEMORY_ATTRIBUTES_MTE	(__MEMORY_ATTRIBUTES		  |	\
+				(UL(0xf0) << (MT_NORMAL_TAGGED * 8)))
 
 /*
  * Hardware page table definitions.
@@ -105,8 +114,32 @@
 
 #define HCR_EL2_E2H_BIT		34
 
+#define ID_AA64PFR1_EL1_MTE_MASK	0xfUL
+#define ID_AA64PFR1_EL1_MTE_SHIFT	8
+#define FEAT_MTE_NOT_IMPLEMENTED	0x0U
+#define FEAT_MTE_IMPLEMENTED		0x1U
+#define FEAT_MTE2_IMPLEMENTED		0x2U
+#define FEAT_MTE3_IMPLEMENTED		0x3U
+
 #ifndef __ASSEMBLY__
 #include <linux/types.h>
+
+static inline u64 read_id_aa64pfr1_el1(void)
+{
+	u64 val;
+
+	asm volatile("mrs %0, id_aa64pfr1_el1" : "=r"(val));
+
+	return val;
+}
+
+static inline bool feat_mte2_is_available(void)
+{
+	u64 id = read_id_aa64pfr1_el1();
+	u8 mte = (id >> ID_AA64PFR1_EL1_MTE_SHIFT) & ID_AA64PFR1_EL1_MTE_MASK;
+
+	return mte >= FEAT_MTE2_IMPLEMENTED;
+}
 
 static inline void set_ttbr_tcr_mair(int el, u64 table, u64 tcr, u64 attr)
 {

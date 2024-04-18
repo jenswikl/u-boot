@@ -18,6 +18,7 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+
 #if !CONFIG_IS_ENABLED(SYS_DCACHE_OFF)
 
 /*
@@ -459,6 +460,14 @@ static void setup_all_pgtables(void)
 	gd->arch.tlb_size = tlb_size;
 }
 
+static inline u64 get_memory_attributes(void)
+{
+	if (CONFIG_IS_ENABLED(ARMV8_MTE) && feat_mte2_is_available())
+		return MEMORY_ATTRIBUTES_MTE;
+	else
+		return MEMORY_ATTRIBUTES;
+}
+
 /* to activate the MMU we need to set up virtual memory */
 __weak void mmu_setup(void)
 {
@@ -470,7 +479,7 @@ __weak void mmu_setup(void)
 
 	el = current_el();
 	set_ttbr_tcr_mair(el, gd->arch.tlb_addr, get_tcr(NULL, NULL),
-			  MEMORY_ATTRIBUTES);
+			  get_memory_attributes());
 
 	/* enable the mmu */
 	set_sctlr(get_sctlr() | CR_M);

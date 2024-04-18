@@ -191,6 +191,15 @@ config ARMV8_EA_EL3_FIRST
 	  Exception handling at all exception levels for External Abort and
 	  SError interrupt exception are taken in EL3.
 
+config ARMV8_MTE
+	bool "Memory Tagging Extension support"
+	help
+	  Memory Tagging (part of the ARMv8.5 Extensions) provides
+	  architectural support for run-time, always-on detection of
+	  various classes of memory error to aid with software debugging
+	  to eliminate vulnerabilities arising from memory-unsafe
+	  languages.
+
 menuconfig ARMV8_CRYPTO
 	bool "ARM64 Accelerated Cryptographic Algorithms"
 
